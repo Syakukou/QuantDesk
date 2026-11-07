@@ -1,0 +1,30 @@
+# 运行环境与构建产物
+.venv/
+venv/
+__pycache__/
+*.pyc
+build/
+dist/
+*.spec.bak
+
+# 本地数据缓存（~/.quantdesk 的备份副本若放进仓库目录）
+*.pkl
+*.sqlite
+
+# 券商交割单等个人数据，一律不入库
+*.xls
+*.xlsx
+成交*
+对账单*
+
+# 开发期临时脚本与截图
+_probe_*.py
+_shot_*.py
+_selftest_*.py
+成品_*.png
+_crop_*.png
+
+# 系统文件
+Thumbs.db
+.DS_Store
+_shot.py
