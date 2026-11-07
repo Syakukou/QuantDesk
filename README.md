@@ -1,5 +1,7 @@
 # QuantDesk
 
+[![CI](https://github.com/Syakukou/QuantDesk/actions/workflows/ci.yml/badge.svg)](https://github.com/Syakukou/QuantDesk/actions/workflows/ci.yml)
+
 A 股选股 / 回测 / 可转债轮动 / 多市场净值 / 行为审计 / 组合风险 / 事件雷达。
 PyQt6 桌面端，本地运行，默认数据源为东方财富公开接口（免费、免 token）。
 
@@ -126,9 +128,25 @@ python -m venv .venv
 # 无界面自检（真实数据，覆盖引擎/指标/审计/风险全链路）
 .venv/Scripts/python main.py --selftest
 
+# 离线自检（不联网、不开窗口，CI 用的就是这一份）
+.venv/Scripts/python ci_check.py -v
+
 # 解析一份交割单并打印结果
 .venv/Scripts/python main.py --check-statement "C:\path\to\成交.xls"
 ```
+
+## 持续集成
+
+`.github/workflows/ci.yml` 分两层，故意不把联网检查放进每次推送：
+
+| 任务 | 触发 | 跑什么 | 为什么这样分 |
+|---|---|---|---|
+| 离线自检 | push / PR 到 main | `ci_check.py`：语法编译、18 个模块导入、合成数据回测内核、排序解析与财报期推算 | 不依赖外网，结果确定，红了就一定是代码问题 |
+| 联网行情自检 | 手动 workflow_dispatch 并勾选 | `main.py --selftest`：真实行情、多周期 K 线、参数扫描、滚动样本外、交割单链路 | 依赖东财接口可用性，跑在海外 runner 上偶发超时，放自动流程里只会制造噪音 |
+
+手动跑联网自检：仓库页 **Actions → CI → Run workflow → 勾上 online_selftest → Run**。
+
+`ci_check.py` 本地和 CI 共用同一份判定逻辑，避免两套标准漂移；提交前跑一遍即可挡掉绝大多数低级错误。
 
 ## 打包
 
