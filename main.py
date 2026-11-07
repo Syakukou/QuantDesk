@@ -2296,8 +2296,8 @@ def selftest():
         tmp = os.path.join(tempfile.gettempdir(), "qd_selftest_stmt.csv")
         with open(tmp, "w", encoding="utf-8") as f:
             f.write("成交日期,证券代码,证券名称,买卖标志,成交价格,成交数量,成交金额,手续费,印花税,过户费\n")
-            f.write("2026-03-02,603011,合锻智能,买入,22.10,1000,22100,4.42,0,0\n")
-            f.write("2026-04-02,603011,合锻智能,卖出,24.10,1000,24100,4.82,24.10,0.48\n")
+            f.write("2026-03-02,600000,浦发银行,买入,8.50,1000,8500,5.00,0,0.09\n")
+            f.write("2026-04-02,600000,浦发银行,卖出,9.10,1000,9100,5.00,4.55,0.09\n")
         recs, meta = trades_io.load_statement(tmp)
         reb = trades_io.rebuild(recs)
         st = reb["summary"]
