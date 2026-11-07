@@ -13,9 +13,10 @@ on:
         type: boolean
         default: false
 
-# 同一分支连续推送时，取消上一次未完成的运行，省额度也省等待
+# 同一分支连续推送时，取消上一次未完成的运行，省额度也省等待。
+# 但手动触发的运行不能和 push 归进同一组，否则会被后续 push 误杀（踩过一次）。
 concurrency:
-  group: ci-${{ github.ref }}
+  group: ci-${{ github.ref }}-${{ github.event_name }}
   cancel-in-progress: true
 
 permissions:
