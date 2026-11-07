@@ -3,7 +3,8 @@
 这些数据券商客户端都有零散入口，但没有一个地方把它们按「对我持仓的影响」
 排成一列。这里的排序逻辑是：离今天越近、指向我持仓越明确，越靠前。
 
-所有全量接口都落盘缓存，TTL 12 小时。东财全量增减持要 170 秒，不能每次点都重拉。
+所有接口都落盘缓存，TTL 12 小时。翻页一律带日期或页数上限：东财增减持不带
+filter 时是全量 17.3 万条、347 页，慢网络上能滚成几小时。
 """
 from __future__ import annotations
 
@@ -14,6 +15,8 @@ from datetime import datetime, timedelta
 
 import numpy as np
 import pandas as pd
+
+import net
 
 CACHE_DIR = os.path.join(os.path.expanduser("~"), ".quantdesk", "cache")
 TTL = 12 * 3600
@@ -325,21 +328,60 @@ def unlock_daily(start: str | None = None, days: int = 30) -> pd.DataFrame:
 
 # ---------------------------------------------------------------- 增减持 / 回购 / 新股
 
-def hold_changes(days: int = 30, force: bool = False) -> pd.DataFrame:
-    """董监高及股东增减持明细。全量 17 万条要 170 秒，必须缓存。
+# 东财高管持股报表的字段 -> 中文列名，口径与 akshare 保持一致
+_HOLD_RENAME = {
+    "SECURITY_CODE": "代码",
+    "SECURITY_NAME": "名称",
+    "CHANGE_DATE": "日期",
+    "PERSON_NAME": "变动人",
+    "CHANGE_SHARES": "变动股数",
+    "AVERAGE_PRICE": "成交均价",
+    "CHANGE_AMOUNT": "变动金额",
+    "CHANGE_REASON": "变动原因",
+    "CHANGE_RATIO": "变动比例",
+    "CHANGE_AFTER_HOLDNUM": "变动后持股数",
+    "HOLD_TYPE": "持股种类",
+    "DSE_PERSON_NAME": "董监高人员姓名",
+    "POSITION_NAME": "职务",
+    "PERSON_DSE_RELATION": "变动人与董监高的关系",
+    "BEGIN_HOLD_NUM": "开始时持有",
+    "END_HOLD_NUM": "结束后持有",
+}
+
+
+def hold_changes(days: int = 30, force: bool = False, max_pages: int = 12,
+                 progress=None) -> pd.DataFrame:
+    """董监高及股东增减持明细。
+
+    必须带日期过滤。不传 filter 时接口返回全量 17.3 万条、347 页，本机也要
+    一分多钟，慢网络上按每页几十秒滚就是几小时，界面看起来就是卡死。带上
+    (CHANGE_DATE>=...) 之后通常只剩 2 到 4 页。
 
     方向以「变动股数」的正负为准，不看「变动原因」的文字：同一个原因
     「集中竞价」既能是买也能是卖，只有股数符号是可靠的。
     """
-    import akshare as ak
-    df = _cached("hold_mgmt.pkl", lambda: ak.stock_hold_management_detail_em(),
-                 force=force, ttl=24 * 3600)
+    cut = pd.Timestamp.now().normalize() - pd.Timedelta(days=days)
+    start = cut.strftime("%Y-%m-%d")
+
+    def load():
+        rows = net.dc_pages(
+            "RPT_EXECUTIVE_HOLD_DETAILS",
+            filter_=f"(CHANGE_DATE>='{start}')",
+            max_pages=max_pages,
+            sort_columns="CHANGE_DATE,SECURITY_CODE,PERSON_NAME",
+            sort_types="-1,1,1",
+            progress=progress, label="增减持")
+        if not rows:
+            return pd.DataFrame()
+        return pd.DataFrame(rows).rename(columns=_HOLD_RENAME)
+
+    df = _cached(f"hold_mgmt_{days}_{start}.pkl", load, force=force,
+                 ttl=24 * 3600)
     if df is None or df.empty:
         return pd.DataFrame()
     df = df.copy()
     df["代码"] = df["代码"].astype(str).str.zfill(6)
     df["日期"] = pd.to_datetime(df["日期"], errors="coerce")
-    cut = pd.Timestamp.now().normalize() - pd.Timedelta(days=days)
     df = df[df["日期"] >= cut]
     for c in ["变动股数", "变动金额", "成交均价", "变动后持股数", "变动比例"]:
         if c in df.columns:

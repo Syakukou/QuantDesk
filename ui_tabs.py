@@ -33,6 +33,7 @@ import events
 import holders
 import metrics
 import multimkt
+import net
 import optimizer
 import riskx
 import rotation
@@ -1819,38 +1820,62 @@ class EventTab(QWidget):
         if self._worker and self._worker.isRunning():
             return
         self.btn.setEnabled(False)
-        self.status.setText("正在拉公告、解禁、龙虎榜、增减持…首次较慢")
-        self._worker = Worker(self._job)
+        self.status.setText("开始取数…")
+        self._worker = WorkerSig(self._job)
+        self._worker.tick.connect(lambda m: self.status.setText("正在拉取 " + m))
         self._worker.done.connect(self._on_done)
         self._worker.fail.connect(self._on_fail)
         self._worker.start()
 
-    def _job(self):
+    def _job(self, tick):
+        """四类事件逐个拉，每步都报进度；某一步失败不影响其余三步。
+
+        以前这里把异常全部 pass 掉，界面只显示「首次较慢」，慢网络下看不出
+        卡在哪一步，也看不出是失败还是还在跑。现在收集原因一起报出去。
+        """
+        net.tune_akshare()
         days = int(self.days.value())
         out = {"notice": pd.DataFrame(), "nsum": {"total": 0},
                "unlock": pd.DataFrame(), "uday": pd.DataFrame(),
                "lb": pd.DataFrame(), "lbv": [], "hc": pd.DataFrame(),
-               "hcs": pd.DataFrame()}
+               "hcs": pd.DataFrame(), "errors": []}
+
+        # 四个源里三个走东财 datacenter，这个域名不通就别逐个等超时
+        tick("网络预检")
         try:
-            out["notice"] = events.notice_radar()
-            out["nsum"] = events.notice_summary(out["notice"])
-        except Exception:  # noqa: BLE001
-            pass
-        try:
-            out["unlock"] = events.unlock(days=30)
-            out["uday"] = events.unlock_daily(days=30)
-        except Exception:  # noqa: BLE001
-            pass
-        try:
-            out["lb"] = events.lhb(days=days)
-            out["lbv"] = events.lhb_verdict(out["lb"])
-        except Exception:  # noqa: BLE001
-            pass
-        try:
-            out["hc"] = events.hold_changes(days=days)
-            out["hcs"] = events.hold_changes_summary(out["hc"])
-        except Exception:  # noqa: BLE001
-            pass
+            net.preflight()
+        except Exception as exc:  # noqa: BLE001
+            out["errors"].append("网络预检未通过，" + net.reason(exc))
+            return out
+
+        def step(label, fn):
+            tick(label)
+            try:
+                return fn()
+            except Exception as exc:  # noqa: BLE001
+                out["errors"].append(f"{label}：{net.reason(exc)}")
+                return None
+
+        d = step("公告", lambda: events.notice_radar())
+        if d is not None:
+            out["notice"] = d
+            out["nsum"] = events.notice_summary(d)
+
+        u = step("解禁", lambda: (events.unlock(days=30),
+                                events.unlock_daily(days=30)))
+        if u:
+            out["unlock"], out["uday"] = u
+
+        lb = step("龙虎榜", lambda: events.lhb(days=days))
+        if lb is not None:
+            out["lb"] = lb
+            out["lbv"] = events.lhb_verdict(lb)
+
+        hc = step("增减持", lambda: events.hold_changes(
+            days=days, progress=lambda m: tick("增减持 · " + m)))
+        if hc is not None:
+            out["hc"] = hc
+            out["hcs"] = events.hold_changes_summary(hc)
         return out
 
     def _on_done(self, p):
@@ -1868,12 +1893,19 @@ class EventTab(QWidget):
         self._fill_hcs(hcs)
 
         ns = p.get("nsum") or {}
-        self.status.setText(
-            f"完成：公告 {ns.get('total', 0)} 条｜解禁 {len(self._unlock)} 笔"
-            f"｜龙虎榜 {len(self._lb)} 条｜增减持 {len(self._hc)} 笔")
+        msg = (f"完成：公告 {ns.get('total', 0)} 条｜解禁 {len(self._unlock)} 笔"
+               f"｜龙虎榜 {len(self._lb)} 条｜增减持 {len(self._hc)} 笔")
+        errs = p.get("errors") or []
+        if errs:
+            msg += "　⚠ " + "；".join(errs)
+            self.status.setStyleSheet("color:#c0392b;")
+        else:
+            self.status.setStyleSheet("")
+        self.status.setText(msg)
 
     def _on_fail(self, msg):
         self.btn.setEnabled(True)
+        self.status.setStyleSheet("color:#c0392b;")
         self.status.setText("出错了：" + msg.splitlines()[0])
         print(msg)
 

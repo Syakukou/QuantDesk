@@ -5,6 +5,8 @@ __pycache__/
 *.pyc
 build/
 dist/
+dist_new/
+build_new/
 *.spec.bak
 
 # 本地数据缓存（~/.quantdesk 的备份副本若放进仓库目录）
