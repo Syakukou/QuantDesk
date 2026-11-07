@@ -9,13 +9,19 @@ PyQt6 桌面端，本地运行，默认数据源为东方财富公开接口（�
 
 不想装 Python 环境，直接用免安装版（Windows 10/11 64 位）：
 
-**[下载 QuantDesk v1.0.0（84MB）](https://github.com/Syakukou/QuantDesk/releases/latest)**
+**[下载 QuantDesk v1.0.1（85MB）](https://github.com/Syakukou/QuantDesk/releases/latest)**
 
 解压后双击 `QuantDesk.exe` 即可，不需要 Python 或任何依赖。
+
+> 拷到另一台电脑时，请带上整个 `QuantDesk` 文件夹（`QuantDesk.exe` 与 `_internal` 目录）。
+> 只拷 exe 起不来。能看见界面就说明文件齐了，之后若卡在某一步，看状态栏的红字提示。
 
 - exe 未经代码签名，首次运行 Windows SmartScreen 会拦一次，点「更多信息」→「仍要运行」
 - 首次启动要拉全市场行情快照，慢十几秒属正常，需要联网
 - 配置写在 `%USERPROFILE%\.quantdesk\`，删掉这个目录即恢复默认
+
+v1.0.1 修的是换机器后的老问题：事件雷达的增减持过去走全量报表，17.3 万条、347 页，
+慢网络下能卡几小时；现在按日期取，只翻 2 到 4 页。
 
 想从源码跑、或改代码，看下面的「运行」章节。源码压缩包在仓库页 **Code → Download ZIP**。
 
