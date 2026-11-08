@@ -12,10 +12,11 @@ PyQt6 桌面端，本地运行，默认数据源为东方财富公开接口（�
 | 平台 | 文件 | 大小 |
 |---|---|---|
 | Windows 10/11 64 位 | `QuantDesk-v1.0.1-win64.zip` | 84 MB |
-| macOS Apple Silicon（M1 及之后） | `QuantDesk-v1.0.1-macos-arm64.dmg` | 76 MB |
-| macOS Intel | `QuantDesk-v1.0.1-macos-x86_64.dmg` | 82 MB |
+| macOS Apple Silicon（M1 及之后，12.0+） | `QuantDesk-v1.0.1-macos-arm64.dmg` | 77 MB |
+| macOS Intel（12.0+） | `QuantDesk-v1.0.1-macos-x86_64.dmg` | 82 MB |
 
 不确定 Mac 是哪种芯片：左上角苹果菜单 → 关于本机 → 看「芯片」一行，写着 Apple M 开头的选 arm64，写着 Intel 的选 x86_64。
+系统版本在同一个界面里看，macOS 12 Monterey 及以上都能跑。
 
 **Windows**：解压后双击 `QuantDesk.exe`。拷到另一台电脑时请带上整个 `QuantDesk` 文件夹
 （`QuantDesk.exe` 与 `_internal` 目录），只拷 exe 起不来。能看见界面就说明文件齐了，

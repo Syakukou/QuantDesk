@@ -86,6 +86,14 @@ jobs:
           codesign --verify --deep --strict --verbose=2 dist/QuantDesk.app
           codesign -dv dist/QuantDesk.app 2>&1 | head -5
 
+      # PyQt6 的 wheel 标签不可信：6.12 标的是 macosx_11_0，实际 QtCore 要 14.4。
+      # 唯一可靠的判据是二进制里写死的 minos，打出来留在日志里方便回溯。
+      - name: 记录二进制里的真实最低系统
+        run: |
+          QTCORE=$(find dist/QuantDesk.app -name QtCore -path "*Versions/A/QtCore" | head -1)
+          echo "QtCore: $QTCORE"
+          otool -l "$QTCORE" | grep -A4 -E "LC_BUILD_VERSION|LC_VERSION_MIN_MACOSX" | head -8
+
       - name: 冒烟测试（无界面启动 20 秒，确认不闪退）
         env:
           QT_QPA_PLATFORM: offscreen
@@ -189,6 +197,13 @@ jobs:
             codesign --force --deep --sign - dist/QuantDesk.app
           fi
           codesign --verify --deep --strict --verbose=2 dist/QuantDesk.app
+
+      # 同上：wheel 标签不可信，以二进制里的 minos 为准
+      - name: 记录二进制里的真实最低系统
+        run: |
+          QTCORE=$(find dist/QuantDesk.app -name QtCore -path "*Versions/A/QtCore" | head -1)
+          echo "QtCore: $QTCORE"
+          otool -l "$QTCORE" | grep -A4 -E "LC_BUILD_VERSION|LC_VERSION_MIN_MACOSX" | head -8
 
       - name: 冒烟测试（无界面启动 20 秒）
         env:
