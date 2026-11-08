@@ -19,6 +19,9 @@ permissions:
 env:
   # 手动触发用输入值，tag 触发用 tag 名本身
   REL_TAG: ${{ inputs.release_tag || github.ref_name }}
+  # 与下面固定的 Qt 6.9 对应。Qt 6.12 的二进制是在 macOS 14.4 上构建的，
+  # 打出来的 app 在 Sonoma 之前的系统上直接起不来；6.9 的部署目标是 12.0。
+  MACOS_MIN: "12.0"
 
 jobs:
   # ------------------------------------------------------------------ Apple Silicon
@@ -44,6 +47,11 @@ jobs:
           pip install pyinstaller
           pip list | grep -Ei "pyqt6|akshare|pandas|numpy|matplotlib|pyinstaller"
 
+      - name: 固定 Qt 版本（把最低系统从 14.4 放宽到 12.0）
+        run: |
+          pip install "PyQt6>=6.9,<6.10"
+          python -c "import PyQt6.QtCore as c; print('Qt', c.QT_VERSION_STR, 'PyQt6', c.PYQT_VERSION_STR)"
+
       - name: 打包 .app
         run: |
           pyinstaller --noconfirm --windowed --name QuantDesk \
@@ -54,6 +62,18 @@ jobs:
             main.py
           ls -la dist/
           du -sh dist/QuantDesk.app
+
+      - name: 写入版本号与最低系统（PyInstaller 默认写 0.0.0 且不声明 minos）
+        run: |
+          PLIST=dist/QuantDesk.app/Contents/Info.plist
+          VER="${REL_TAG#v}"
+          /usr/libexec/PlistBuddy -c "Set :CFBundleShortVersionString $VER" "$PLIST"
+          /usr/libexec/PlistBuddy -c "Add :CFBundleVersion string $VER" "$PLIST" 2>/dev/null || \
+            /usr/libexec/PlistBuddy -c "Set :CFBundleVersion $VER" "$PLIST"
+          /usr/libexec/PlistBuddy -c "Add :LSMinimumSystemVersion string $MACOS_MIN" "$PLIST" 2>/dev/null || \
+            /usr/libexec/PlistBuddy -c "Set :LSMinimumSystemVersion $MACOS_MIN" "$PLIST"
+          /usr/libexec/PlistBuddy -c "Add :NSHumanReadableCopyright string 数据版权归原平台所有,不构成投资建议" "$PLIST" 2>/dev/null || true
+          /usr/libexec/PlistBuddy -c "Print" "$PLIST" | head -24
 
       - name: 签名（ad-hoc，arm64 必须至少有临时签名才能启动）
         run: |
@@ -138,6 +158,11 @@ jobs:
           pip install -r requirements.txt
           pip install pyinstaller
 
+      - name: 固定 Qt 版本（把最低系统从 14.4 放宽到 12.0）
+        run: |
+          pip install "PyQt6>=6.9,<6.10"
+          python -c "import PyQt6.QtCore as c; print('Qt', c.QT_VERSION_STR)"
+
       - name: 打包 .app
         run: |
           pyinstaller --noconfirm --windowed --name QuantDesk \
@@ -147,6 +172,16 @@ jobs:
             --hidden-import matplotlib.backends.backend_qtagg \
             main.py
           du -sh dist/QuantDesk.app
+
+      - name: 写入版本号与最低系统
+        run: |
+          PLIST=dist/QuantDesk.app/Contents/Info.plist
+          VER="${REL_TAG#v}"
+          /usr/libexec/PlistBuddy -c "Set :CFBundleShortVersionString $VER" "$PLIST"
+          /usr/libexec/PlistBuddy -c "Add :CFBundleVersion string $VER" "$PLIST" 2>/dev/null || \
+            /usr/libexec/PlistBuddy -c "Set :CFBundleVersion $VER" "$PLIST"
+          /usr/libexec/PlistBuddy -c "Add :LSMinimumSystemVersion string $MACOS_MIN" "$PLIST" 2>/dev/null || \
+            /usr/libexec/PlistBuddy -c "Set :LSMinimumSystemVersion $MACOS_MIN" "$PLIST"
 
       - name: 签名（ad-hoc）
         run: |
