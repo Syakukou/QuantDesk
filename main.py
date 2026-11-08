@@ -2225,6 +2225,93 @@ class MainWindow(QMainWindow):
 # --------------------------------------------------------------------------- #
 # 无界面自检（开发/打包后验证链路）
 # --------------------------------------------------------------------------- #
+def _events_log_path():
+    """事件自检日志放在桌面，方便出问题时直接发回来。"""
+    for d in (os.path.join(os.path.expanduser("~"), "Desktop"), tempfile.gettempdir()):
+        try:
+            if os.path.isdir(d) and os.access(d, os.W_OK):
+                return os.path.join(d, "QuantDesk_events.log")
+        except Exception:
+            continue
+    return os.path.join(tempfile.gettempdir(), "QuantDesk_events.log")
+
+
+def selftest_events(days: int = 30):
+    """无界面跑一遍事件雷达的四类取数，逐项记耗时与结果。
+
+    打包版是 --windowed，sys.stdout 为 None，print 出来的东西没人看得见，
+    所以整个结果必须落盘。这也是排查「界面一直停在正在拉取」的唯一手段：
+    能看出是卡在哪一类、耗时多少、还是直接抛错。
+    """
+    import time as _t
+    import net as _net
+    import events as _ev
+    import requests
+
+    out = []
+
+    def say(s):
+        out.append(str(s))
+
+    def dump():
+        try:
+            with open(_events_log_path(), "w", encoding="utf-8") as f:
+                f.write("\n".join(out) + "\n")
+        except Exception:
+            pass
+
+    t_all = _t.time()
+    say("=== 事件雷达自检 %s ===" % datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S"))
+    say("frozen=%r" % (getattr(sys, "frozen", False),))
+    say("exe=%r" % (sys.executable,))
+    say("cwd=%r" % (os.getcwd(),))
+    say("stdout=%r stderr=%r" % (sys.stdout, sys.stderr))
+    say("")
+
+    _net.tune_akshare()
+    try:
+        from akshare.utils.context import config as _akcfg
+        say("akshare 全局超时 = %r" % (_akcfg.timeout,))
+    except Exception as exc:  # noqa: BLE001
+        say("akshare 全局超时读取失败：%r" % (exc,))
+    say("requests 环境代理 = %r" % (requests.utils.getproxies(),))
+
+    ok = True
+    t = _t.time()
+    try:
+        _net.preflight()
+        say("[OK]   网络预检 %6.2fs" % (_t.time() - t))
+    except Exception as exc:  # noqa: BLE001
+        say("[FAIL] 网络预检 %6.2fs -> %s" % (_t.time() - t, _net.reason(exc)))
+        say("")
+        say("=== 结束：网络不通，后续步骤跳过 ===")
+        dump()
+        return 1
+
+    steps = [
+        ("公告", lambda: _ev.notice_radar()),
+        ("解禁", lambda: _ev.unlock(days=30)),
+        ("龙虎榜", lambda: _ev.lhb(days=days)),
+        ("增减持", lambda: _ev.hold_changes(days=days)),
+    ]
+    for name, fn in steps:
+        t = _t.time()
+        try:
+            df = fn()
+            say("[OK]   %-4s %6.2fs  %5d 行" % (name, _t.time() - t, len(df)))
+        except Exception as exc:  # noqa: BLE001
+            ok = False
+            say("[FAIL] %-4s %6.2fs  %s" % (name, _t.time() - t, _net.reason(exc)))
+            for ln in traceback.format_exc().splitlines():
+                say("       " + ln)
+
+    say("")
+    say("=== 结束 总耗时 %.2fs  结果 %s ===" % (_t.time() - t_all, "全部正常" if ok else "有失败项"))
+    say("日志：%s" % _events_log_path())
+    dump()
+    return 0 if ok else 1
+
+
 def selftest():
     ok = True
     print("=== QuantDesk 自检（真实 A 股数据）===")
@@ -2534,7 +2621,26 @@ def check_statement(path: str) -> int:
     return 0
 
 
+def _ensure_streams():
+    """--windowed 打包后 sys.stdout / sys.stderr 是 None。
+
+    这时任何 print 或第三方库的进度条（tqdm 写 stderr）都会抛
+    AttributeError: 'NoneType' object has no attribute 'write'。
+    取数线程里一旦撞上，轻则某一步莫名失败，重则线程静默死掉、
+    界面永远停在「正在拉取」，看起来就是卡死。统一挂到 devnull。
+    """
+    try:
+        null = open(os.devnull, "w", encoding="utf-8")
+    except Exception:
+        return
+    if sys.stdout is None:
+        sys.stdout = null
+    if sys.stderr is None:
+        sys.stderr = null
+
+
 def main():
+    _ensure_streams()
     try:
         if hasattr(sys.stdout, "reconfigure"):
             sys.stdout.reconfigure(encoding="utf-8", errors="replace")
@@ -2545,11 +2651,15 @@ def main():
 
     parser = argparse.ArgumentParser(description="QuantDesk 自研 A 股 看盘/回测 桌面程序")
     parser.add_argument("--selftest", action="store_true", help="无界面自检（验证数据/回测链路）")
+    parser.add_argument("--selftest-events", action="store_true",
+                        help="无界面自检事件雷达四类取数，结果写到桌面 QuantDesk_events.log")
     parser.add_argument("--check-statement", metavar="文件", default=None,
                         help="只解析一份交割单并打印统计，用于验证券商格式")
     args = parser.parse_args()
     if args.selftest:
         sys.exit(selftest())
+    if args.selftest_events:
+        sys.exit(selftest_events())
     if args.check_statement:
         sys.exit(check_statement(args.check_statement))
 

@@ -11,6 +11,7 @@
 from __future__ import annotations
 
 import os
+import time
 import traceback
 
 import numpy as np
@@ -1648,6 +1649,9 @@ class EventTab(QWidget):
     def __init__(self, parent=None):
         super().__init__(parent)
         self._worker = None
+        self._t0 = 0.0
+        self._step = "准备"
+        self._warn_until = 0.0
         self._notice_view = pd.DataFrame()
         self._unlock = pd.DataFrame()
         self._lb = pd.DataFrame()
@@ -1669,9 +1673,12 @@ class EventTab(QWidget):
         self.days.setValue(25)
         self.days.setSuffix(" 天")
         bar.addWidget(self.days)
-        self.status = QLabel("就绪。增减持首次拉全量约 3 分钟，之后走本地缓存")
+        self.status = QLabel("就绪。点按钮拉取公告、解禁、龙虎榜、增减持，通常几秒出结果")
         self.status.setStyleSheet("color:#888;")
         bar.addWidget(self.status, 1)
+
+        self._watch = QTimer(self)
+        self._watch.timeout.connect(self._tick_clock)
         root.addLayout(bar)
 
         self.sub = QTabWidget()
@@ -1817,15 +1824,60 @@ class EventTab(QWidget):
 
     # ------------------------------------------------------------------ 拉数
     def run_load(self):
+        # 上一次还没跑完时，不能静默 return——那样连点几下按钮毫无反应，
+        # 界面上永远是上一次那句「正在拉取」，看着就像死了。
         if self._worker and self._worker.isRunning():
+            el = int(time.time() - (self._t0 or time.time()))
+            self._warn_until = time.time() + 2.5
+            self.status.setStyleSheet("color:#b8860b;")
+            self.status.setText(
+                f"上一次取数还在进行（已 {el} 秒，当前步骤：{self._step}），完成后会自动刷新")
             return
+
+        self._step = "准备"
+        self._t0 = time.time()
         self.btn.setEnabled(False)
+        self.btn.setText("正在拉取…")
+        self.status.setStyleSheet("")
         self.status.setText("开始取数…")
         self._worker = WorkerSig(self._job)
-        self._worker.tick.connect(lambda m: self.status.setText("正在拉取 " + m))
+        self._worker.tick.connect(self._on_tick)
         self._worker.done.connect(self._on_done)
         self._worker.fail.connect(self._on_fail)
         self._worker.start()
+
+        if not hasattr(self, "_watch"):
+            self._watch = QTimer(self)
+            self._watch.timeout.connect(self._tick_clock)
+        self._watch.start(1000)
+
+    def _on_tick(self, step):
+        self._step = step
+        self._tick_clock()
+
+    def _tick_clock(self):
+        """每秒刷一次已用时间。数字在动，人才知道它没死。"""
+        if time.time() < getattr(self, "_warn_until", 0):
+            return
+        if not (self._worker and self._worker.isRunning()):
+            return
+        el = int(time.time() - self._t0)
+        if el >= 90:
+            self.status.setStyleSheet("color:#b8860b;")
+            self.status.setText(
+                f"正在拉取 {self._step}（已 {el} 秒，网络偏慢，仍在继续）")
+        else:
+            self.status.setStyleSheet("")
+            self.status.setText(f"正在拉取 {self._step}（已 {el} 秒）")
+
+    def _stop_watch(self):
+        try:
+            if hasattr(self, "_watch"):
+                self._watch.stop()
+        except Exception:  # noqa: BLE001
+            pass
+        self.btn.setEnabled(True)
+        self.btn.setText("刷新全部事件")
 
     def _job(self, tick):
         """四类事件逐个拉，每步都报进度；某一步失败不影响其余三步。
@@ -1879,7 +1931,7 @@ class EventTab(QWidget):
         return out
 
     def _on_done(self, p):
-        self.btn.setEnabled(True)
+        self._stop_watch()
         self._notice_view = pd.DataFrame()
         self._fill_notice(p.get("notice"), p.get("nsum") or {})
         self._fill_unlock(p.get("unlock"), p.get("uday"))
@@ -1904,7 +1956,7 @@ class EventTab(QWidget):
         self.status.setText(msg)
 
     def _on_fail(self, msg):
-        self.btn.setEnabled(True)
+        self._stop_watch()
         self.status.setStyleSheet("color:#c0392b;")
         self.status.setText("出错了：" + msg.splitlines()[0])
         print(msg)

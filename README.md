@@ -11,9 +11,9 @@ PyQt6 桌面端，本地运行，默认数据源为东方财富公开接口（�
 
 | 平台 | 文件 | 大小 |
 |---|---|---|
-| Windows 10/11 64 位 | `QuantDesk-v1.0.1-win64.zip` | 84 MB |
-| macOS Apple Silicon（M1 及之后，12.0+） | `QuantDesk-v1.0.1-macos-arm64.dmg` | 77 MB |
-| macOS Intel（12.0+） | `QuantDesk-v1.0.1-macos-x86_64.dmg` | 82 MB |
+| Windows 10/11 64 位 | `QuantDesk-v1.0.2-win64.zip` | 85 MB |
+| macOS Apple Silicon（M1 及之后，12.0+） | `QuantDesk-v1.0.2-macos-arm64.dmg` | 77 MB |
+| macOS Intel（12.0+） | `QuantDesk-v1.0.2-macos-x86_64.dmg` | 82 MB |
 
 不确定 Mac 是哪种芯片：左上角苹果菜单 → 关于本机 → 看「芯片」一行，写着 Apple M 开头的选 arm64，写着 Intel 的选 x86_64。
 系统版本在同一个界面里看，macOS 12 Monterey 及以上都能跑。
@@ -38,6 +38,20 @@ PyQt6 桌面端，本地运行，默认数据源为东方财富公开接口（�
 
 v1.0.1 修的是换机器后的老问题：事件雷达的增减持过去走全量报表，17.3 万条、347 页，
 慢网络下能卡几小时；现在按日期取，只翻 2 到 4 页。
+
+v1.0.2 修的是「点了刷新，界面一直停在正在拉取」这件事本身。状态栏现在每秒跳一次已用
+秒数并写明当前步骤（网络预检 / 公告 / 解禁 / 龙虎榜 / 增减持），跑完恢复正常；上一次
+没跑完时再点按钮会提示「已 N 秒」，不再毫无反应。另外 `--windowed` 打包下 `sys.stdout`
+是 None，第三方库的进度条写它就会抛异常，这个口子也堵上了。
+
+**取不到数据时，让程序自己说清楚**。在这个文件夹里执行：
+
+```bat
+QuantDesk.exe --selftest-events
+```
+
+会在桌面生成 `QuantDesk_events.log`，逐项列出网络预检和四类取数的耗时与行数，
+哪一步失败、失败原因、总耗时都写在里面。把这个文件发出来就能定位，比截图准确。
 
 想从源码跑、或改代码，看下面的「运行」章节。源码压缩包在仓库页 **Code → Download ZIP**。
 macOS 版由 Actions 在真实 macOS runner 上构建，构建配置见 `.github/workflows/build-macos.yml`。

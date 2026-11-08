@@ -7,6 +7,8 @@ build/
 dist/
 dist_new/
 build_new/
+dist_v*/
+build_v*/
 *.spec.bak
 
 # 本地数据缓存（~/.quantdesk 的备份副本若放进仓库目录）
