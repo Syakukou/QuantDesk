@@ -104,10 +104,15 @@ import numpy as np
 import matplotlib
 matplotlib.use("QtAgg")
 # 中文字体：否则图表标题/图例会显示成方块（DejaVu Sans 无 CJK 字形）
+# 三个平台的中文字体名都不一样，按平台给候选，后面的兜底放通用名。
+_CJK_FONTS = {
+    "win32": ["Microsoft YaHei", "SimHei", "SimSun", "DejaVu Sans"],
+    "darwin": ["PingFang SC", "Hiragino Sans GB", "Heiti SC",
+               "Songti SC", "Arial Unicode MS", "DejaVu Sans"],
+}
 try:
-    matplotlib.rcParams["font.sans-serif"] = [
-        "Microsoft YaHei", "SimHei", "SimSun", "DejaVu Sans",
-    ]
+    matplotlib.rcParams["font.sans-serif"] = _CJK_FONTS.get(
+        sys.platform, ["Noto Sans CJK SC", "WenQuanYi Zen Hei", "DejaVu Sans"])
     matplotlib.rcParams["axes.unicode_minus"] = False
     _trace("中文字体已配置: %r" % (matplotlib.rcParams["font.sans-serif"][:2],))
 except Exception:
@@ -2441,18 +2446,36 @@ def _crash_log_path():
 
 
 def _report_error(title, tb_text):
-    """把启动错误写到日志，并弹一个不依赖 Qt 的原生 Windows 对话框。"""
+    """把启动错误写到日志，并弹一个不依赖 Qt 的原生对话框。
+
+    启动早期报错时 Qt 可能还没起来，所以不能用 QMessageBox。Windows 走
+    user32、macOS 走 osascript，其它平台只落日志（终端里能看到堆栈）。
+    """
     try:
         with open(_crash_log_path(), "w", encoding="utf-8") as f:
             f.write(f"QuantDesk 启动错误（{title}）：\n\n{tb_text}\n")
     except Exception:
         pass
+    msg = (tb_text or title)[:2500]
     try:
-        import ctypes
-        msg = (tb_text or title)[:2500]
-        ctypes.windll.user32.MessageBoxW(0, msg, "QuantDesk 启动失败", 0x10)
+        if sys.platform.startswith("win"):
+            import ctypes
+            ctypes.windll.user32.MessageBoxW(0, msg, "QuantDesk 启动失败", 0x10)
+        elif sys.platform == "darwin":
+            import subprocess
+            script = (
+                'display alert "QuantDesk 启动失败" message %s as critical'
+                % _osascript_quote(msg[:1200])
+            )
+            subprocess.run(["osascript", "-e", script], timeout=30,
+                           capture_output=True)
     except Exception:
         pass
+
+
+def _osascript_quote(s):
+    """把文本转成 AppleScript 字符串字面量（转义反斜杠和双引号）。"""
+    return '"' + s.replace("\\", "\\\\").replace('"', '\\"') + '"'
 
 
 def _apply_light_theme(app):

@@ -1,0 +1,204 @@
+name: Build macOS
+
+# PyInstaller 不能交叉编译：Windows 上打包不出 Mac 能跑的程序，反之亦然。
+# 所以 Mac 版只能在这里用 macOS runner 构建，产物直接挂到 GitHub Release。
+on:
+  workflow_dispatch:
+    inputs:
+      release_tag:
+        description: "挂到哪个 Release（写成已有的 tag，如 v1.0.1）"
+        type: string
+        default: "v1.0.1"
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write          # gh release upload 需要写权限
+
+env:
+  # 手动触发用输入值，tag 触发用 tag 名本身
+  REL_TAG: ${{ inputs.release_tag || github.ref_name }}
+
+jobs:
+  # ------------------------------------------------------------------ Apple Silicon
+  arm64:
+    name: macOS arm64（Apple Silicon）
+    runs-on: macos-latest
+    timeout-minutes: 40
+    steps:
+      - name: 检出代码
+        uses: actions/checkout@v4
+
+      - name: 安装 Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: requirements.txt
+
+      - name: 安装依赖
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install pyinstaller
+          pip list | grep -Ei "pyqt6|akshare|pandas|numpy|matplotlib|pyinstaller"
+
+      - name: 打包 .app
+        run: |
+          pyinstaller --noconfirm --windowed --name QuantDesk \
+            --osx-bundle-identifier com.syakukou.quantdesk \
+            --collect-all akshare \
+            --hidden-import PyQt6.sip \
+            --hidden-import matplotlib.backends.backend_qtagg \
+            main.py
+          ls -la dist/
+          du -sh dist/QuantDesk.app
+
+      - name: 签名（ad-hoc，arm64 必须至少有临时签名才能启动）
+        run: |
+          if codesign --verify --deep --strict dist/QuantDesk.app 2>/dev/null; then
+            echo "PyInstaller 已自带签名，跳过"
+          else
+            echo "补一个 ad-hoc 签名"
+            codesign --force --deep --sign - dist/QuantDesk.app
+          fi
+          codesign --verify --deep --strict --verbose=2 dist/QuantDesk.app
+          codesign -dv dist/QuantDesk.app 2>&1 | head -5
+
+      - name: 冒烟测试（无界面启动 20 秒，确认不闪退）
+        env:
+          QT_QPA_PLATFORM: offscreen
+          PYTHONUTF8: "1"
+        run: |
+          ./dist/QuantDesk.app/Contents/MacOS/QuantDesk > /tmp/smoke.log 2>&1 &
+          PID=$!
+          sleep 20
+          if kill -0 $PID 2>/dev/null; then
+            echo "启动正常：20 秒后进程仍在运行"
+            kill -9 $PID || true
+          else
+            echo "启动失败，输出如下："
+            cat /tmp/smoke.log
+            exit 1
+          fi
+
+      - name: 生成 DMG 与 ZIP
+        run: |
+          ARCH=arm64
+          mkdir -p dmg
+          cp -R dist/QuantDesk.app dmg/
+          ln -s /Applications dmg/Applications
+          hdiutil create -volname "QuantDesk" -srcfolder dmg -ov -format UDZO \
+            "QuantDesk-${REL_TAG}-macos-${ARCH}.dmg"
+          ditto -c -k --sequesterRsrc --keepParent dist/QuantDesk.app \
+            "QuantDesk-${REL_TAG}-macos-${ARCH}.zip"
+          ls -lh QuantDesk-*macos*
+
+      - name: 上传为构建产物
+        uses: actions/upload-artifact@v4
+        with:
+          name: QuantDesk-macos-arm64
+          path: |
+            QuantDesk-*-macos-arm64.dmg
+            QuantDesk-*-macos-arm64.zip
+          retention-days: 30
+
+      - name: 挂到 Release
+        if: startsWith(env.REL_TAG, 'v')
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh release upload "$REL_TAG" \
+            "QuantDesk-${REL_TAG}-macos-arm64.dmg" \
+            "QuantDesk-${REL_TAG}-macos-arm64.zip" \
+            --clobber
+
+  # ------------------------------------------------------------------ Intel
+  # macos-15-intel 是可用的最后一个 x86 镜像；万一标签下线，这一路失败不影响 arm64
+  intel:
+    name: macOS x86_64（Intel）
+    runs-on: macos-15-intel
+    continue-on-error: true
+    timeout-minutes: 40
+    steps:
+      - name: 检出代码
+        uses: actions/checkout@v4
+
+      - name: 安装 Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: requirements.txt
+
+      - name: 安装依赖
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install pyinstaller
+
+      - name: 打包 .app
+        run: |
+          pyinstaller --noconfirm --windowed --name QuantDesk \
+            --osx-bundle-identifier com.syakukou.quantdesk \
+            --collect-all akshare \
+            --hidden-import PyQt6.sip \
+            --hidden-import matplotlib.backends.backend_qtagg \
+            main.py
+          du -sh dist/QuantDesk.app
+
+      - name: 签名（ad-hoc）
+        run: |
+          if ! codesign --verify --deep --strict dist/QuantDesk.app 2>/dev/null; then
+            codesign --force --deep --sign - dist/QuantDesk.app
+          fi
+          codesign --verify --deep --strict --verbose=2 dist/QuantDesk.app
+
+      - name: 冒烟测试（无界面启动 20 秒）
+        env:
+          QT_QPA_PLATFORM: offscreen
+          PYTHONUTF8: "1"
+        run: |
+          ./dist/QuantDesk.app/Contents/MacOS/QuantDesk > /tmp/smoke.log 2>&1 &
+          PID=$!
+          sleep 20
+          if kill -0 $PID 2>/dev/null; then
+            echo "启动正常"
+            kill -9 $PID || true
+          else
+            echo "启动失败："
+            cat /tmp/smoke.log
+            exit 1
+          fi
+
+      - name: 生成 DMG 与 ZIP
+        run: |
+          ARCH=x86_64
+          mkdir -p dmg
+          cp -R dist/QuantDesk.app dmg/
+          ln -s /Applications dmg/Applications
+          hdiutil create -volname "QuantDesk" -srcfolder dmg -ov -format UDZO \
+            "QuantDesk-${REL_TAG}-macos-${ARCH}.dmg"
+          ditto -c -k --sequesterRsrc --keepParent dist/QuantDesk.app \
+            "QuantDesk-${REL_TAG}-macos-${ARCH}.zip"
+          ls -lh QuantDesk-*macos*
+
+      - name: 上传为构建产物
+        uses: actions/upload-artifact@v4
+        with:
+          name: QuantDesk-macos-x86_64
+          path: |
+            QuantDesk-*-macos-x86_64.dmg
+            QuantDesk-*-macos-x86_64.zip
+          retention-days: 30
+
+      - name: 挂到 Release
+        if: startsWith(env.REL_TAG, 'v')
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh release upload "$REL_TAG" \
+            "QuantDesk-${REL_TAG}-macos-x86_64.dmg" \
+            "QuantDesk-${REL_TAG}-macos-x86_64.zip" \
+            --clobber
